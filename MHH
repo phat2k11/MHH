@@ -1,0 +1,118 @@
+local player = game.Players.LocalPlayer
+local gui = Instance.new("ScreenGui")
+gui.Name = MHH"
+gui.Parent = player:WaitForChild("PlayerGui")
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+local toggleButton = Instance.new("ImageButton")
+toggleButton.Name = "ToggleButton"
+toggleButton.Parent = gui
+toggleButton.Size = UDim2.new(0, 50, 0, 50)
+toggleButton.Position = UDim2.new(0.05, 0, 0.15, 0)
+toggleButton.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+toggleButton.Image = "rbxassetid://83190276951914"
+toggleButton.Draggable = true
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(1, 0)
+corner.Parent = toggleButton
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 450, 0, 300)
+mainFrame.Position = UDim2.new(0.3, 0, 0.3, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+mainFrame.Visible = false
+mainFrame.Parent = gui
+local corner2 = Instance.new("UICorner")
+corner2.CornerRadius = UDim.new(0, 10)
+corner2.Parent = mainFrame
+local title = Instance.new("TextLabel")
+title.Parent = mainFrame
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundTransparency = 1
+title.Text = "MHH tổng hợp"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextScaled = true
+local tabHolder = Instance.new("Frame")
+tabHolder.Parent = mainFrame
+tabHolder.Position = UDim2.new(0, 0, 0, 40)
+tabHolder.Size = UDim2.new(0, 150, 1, -40)
+tabHolder.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+local contentFrame = Instance.new("Frame")
+contentFrame.Parent = mainFrame
+contentFrame.Position = UDim2.new(0, 150, 0, 40)
+contentFrame.Size = UDim2.new(1, -150, 1, -40)
+contentFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+local function createTab(name)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(1, 0, 0, 40)
+	button.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+	button.Text = name
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.Font = Enum.Font.Gotham
+	button.TextScaled = true
+	button.Parent = tabHolder
+	return button
+end
+local tabs = {
+	["Thông Tin"] = {},
+	["Script Farm"] = {},
+	["Farm Fruit"] = {},
+	["Farm Chest"] = {},
+	["Script Hop"] = {},
+	["Linh Tinh"] = {}
+}
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 5)
+layout.Parent = tabHolder
+local function createContent(name, items)
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(1, 0, 1, 0)
+	frame.Visible = false
+	frame.Parent = contentFrame
+local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 10)
+	layout.Parent = frame
+for _, data in ipairs(items) do
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, -20, 0, 40)
+		btn.Position = UDim2.new(0, 10, 0, 0)
+		btn.BackgroundColor3 = Color3.fromRGB(70, 70, 100)
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		btn.Text = data.Title
+		btn.Font = Enum.Font.GothamBold
+		btn.TextScaled = true
+		btn.Parent = frame
+
+		btn.MouseButton1Click:Connect(function()
+			if data.Callback then
+				data.Callback()
+			end
+		end)
+	end
+
+	return frame
+end
+tabs["Thông Tin"] = createContent("Thông Tin", {
+	{ Title = "Discord - TBoy Community", Callback = function() warn("https://discord.gg/tboyroblox-community") end },
+	{ Title = "YouTube - TBoy Roblox", Callback = function() warn("https://www.youtube.com/@TBoyRoblox08") end },
+	{ Title = "YouTube - TBoy Gamer", Callback = function() warn("https://www.youtube.com/@TBoyGamer08") end },
+})
+
+tabs["Script Farm"] = createContent("Script Farm", {
+	{ Title = "teddy", Callback = function() warn(" (demo)") end },
+	{ Title = "teddy kaitun", Callback = function() warn("(demo)") end },
+})
+for name, frame in pairs(tabs) do
+	local button = createTab(name)
+	button.MouseButton1Click:Connect(function()
+		for _, f in pairs(tabs) do
+			if typeof(f) == "Instance" then
+				f.Visible = false
+			end
+		end
+		frame.Visible = true
+	end)
+end
+toggleButton.MouseButton1Click:Connect(function()
+	mainFrame.Visible = not mainFrame.Visible
+end)
