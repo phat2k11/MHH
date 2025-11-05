@@ -1,0 +1,276 @@
+-- FruitModule
+-- Module to describe fruits and abilities
+
+local FruitModule = {}
+
+-- Define fruit types
+FruitModule.Fruits = {
+    ["Flame"] = {
+        Name = "Flame",
+        Duration = 8, -- ability duration seconds
+        Cooldown = 6,
+        Description = "Short dash of fire that deals damage on touch",
+    },
+    ["Wave"] = {
+        Name = "Wave",
+        Duration = 6,
+        Cooldown = 8,
+        Description = "A forward shockwave that knocks back enemies",
+    },
+}
+
+return FruitModule
+-- FruitSpawner
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local FruitModule = require(ReplicatedStorage:WaitForChild("FruitModule"))
+local FruitRemote = ReplicatedStorage:WaitForChild("FruitRemote")
+
+-- Configuration
+local SPAWN_INTERVAL = 20 -- seconds between spawns
+local MAX_FRUITS = 6
+local AREAS = Workspace:FindFirstChild("FruitSpawnAreas") -- optional folder with Parts to spawn on
+
+-- Helper: pick random point in spawn area (or near origin)
+local function getSpawnCFrame()
+    if AREAS and #AREAS:GetChildren() > 0 then
+        local area = AREAS:GetChildren()[math.random(1, #AREAS:GetChildren())]
+        if area:IsA("BasePart") then
+            local size = area.Size
+            local rndX = (math.random()-0.5) * size.X
+            local rndZ = (math.random()-0.5) * size.Z
+            local pos = area.Position + Vector3.new(rndX, size.Y/2 + 1, rndZ)
+            return CFrame.new(pos)
+        end
+    end
+    -- fallback
+    local pos = Vector3.new(math.random(-50,50), 5, math.random(-50,50))
+    return CFrame.new(pos)
+end
+
+-- Create a fruit Model (simple)
+local function createFruitModel(fruitType)
+    local model = Instance.new("Model")
+    model.Name = fruitType .. "Fruit"
+
+    local part = Instance.new("Part")
+    part.Name = "FruitPart"
+    part.Size = Vector3.new(2,2,2)
+    part.Shape = Enum.PartType.Ball
+    part.Anchored = true
+    part.CanCollide = false
+    part.Parent = model
+
+    -- simple visual
+    local mesh = Instance.new("SpecialMesh", part)
+    mesh.MeshType = Enum.MeshType.Sphere
+
+    -- tag attribute
+    model:SetAttribute("FruitType", fruitType)
+
+    return model
+end
+
+-- Keep track of spawned fruits
+local spawned = {}
+
+local function spawnFruit()
+    if #spawned >= MAX_FRUITS then return end
+
+    local fruitTypes = {}
+    for k,_ in pairs(FruitModule.Fruits) do table.insert(fruitTypes, k) end
+    local pick = fruitTypes[math.random(1,#fruitTypes)]
+    local model = createFruitModel(pick)
+
+    local cf = getSpawnCFrame()
+    model.PrimaryPart = model:WaitForChild("FruitPart")
+    model:SetPrimaryPartCFrame(cf)
+    model.Parent = Workspace
+
+    -- Touch detection
+    local touchedConn
+    touchedConn = model.PrimaryPart.Touched:Connect(function(hit)
+        local character = hit:FindFirstAncestorOfClass("Model")
+        if not character then return end
+        local player = Players:GetPlayerFromCharacter(character)
+        if not player then return end
+
+        -- Give fruit to player (fire remote event to client & server record)
+        FruitRemote:FireClient(player, "Picked", {
+            FruitType = pick,
+            FruitName = FruitModule.Fruits[pick].Name,
+            Duration = FruitModule.Fruits[pick].Duration,
+            Cooldown = FruitModule.Fruits[pick].Cooldown,
+        })
+
+        -- cleanup
+        if touchedConn then touchedConn:Disconnect() end
+        model:Destroy()
+        for i,v in ipairs(spawned) do
+            if v == model then table.remove(spawned, i) break end
+        end
+    end)
+
+    table.insert(spawned, model)
+end
+
+-- Periodic spawner
+spawn(function()
+    while true do
+        spawnFruit()
+        wait(SPAWN_INTERVAL)
+    end
+end)
+
+-- Optional: cleanup if map resets
+game:BindToClose(function()
+    for _,m in ipairs(spawned) do
+        if m and m.Parent then m:Destroy() end
+    end
+end)
+
+-- Example server-side handling for ability effects (simple)
+FruitRemote.OnServerEvent:Connect(function(player, action, data)
+    if action == "UseAbility" then
+        local fruitType = data.FruitType
+        -- Here implement server-validated ability effects (damage, physics, etc)
+        -- Example: create a hitbox in front of player for Flame
+        local char = player.Character
+        if not char then return end
+        if fruitType == "Flame" then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if not hrp then return end
+            local hitPart = Instance.new("Part")
+            hitPart.Size = Vector3.new(4,4,4)
+            hitPart.CanCollide = false
+            hitPart.Anchored = true
+            hitPart.CFrame = hrp.CFrame * CFrame.new(0,0,-6)
+            hitPart.Parent = workspace
+            -- simple damage on touch
+            local conn
+            conn = hitPart.Touched:Connect(function(h)
+                local otherChar = h:FindFirstAncestorOfClass("Model")
+                local pl = Players:GetPlayerFromCharacter(otherChar)
+                if pl and pl ~= player then
+                    local hum = otherChar:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        hum:TakeDamage(15)
+                    end
+                end
+            end)
+            delay(0.6, function()
+                if conn then conn:Disconnect() end
+                hitPart:Destroy()
+            end)
+        elseif fruitType == "Wave" then
+            -- simple wave: apply force to nearby humanoids
+            local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then return end
+            for _,obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("BasePart") and obj.Parent and obj.Parent:FindFirstChildOfClass("Humanoid") then
+                    local hroot = obj.Parent:FindFirstChild("HumanoidRootPart")
+                    if hroot then
+                        local dist = (hroot.Position - hrp.Position).Magnitude
+                        if dist <= 12 and obj.Parent ~= player.Character then
+                            local bodyVel = Instance.new("BodyVelocity")
+                            bodyVel.MaxForce = Vector3.new(1e5,1e5,1e5)
+                            local dir = (hroot.Position - hrp.Position).Unit + Vector3.new(0,0.2,0)
+                            bodyVel.Velocity = dir * 60
+                            bodyVel.Parent = hroot
+                            game.Debris:AddItem(bodyVel, 0.35)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+-- FruitClient (LocalScript)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local StarterGui = game:GetService("StarterGui")
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+local FruitRemote = ReplicatedStorage:WaitForChild("FruitRemote")
+local FruitModule = require(ReplicatedStorage:WaitForChild("FruitModule"))
+
+-- Simple UI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FruitUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = PlayerGui
+
+local frame = Instance.new("Frame", screenGui)
+frame.Size = UDim2.new(0,240,0,90)
+frame.Position = UDim2.new(0.5,-120,0.85,0)
+frame.AnchorPoint = Vector2.new(0.5,0.5)
+frame.BackgroundTransparency = 0.35
+frame.BackgroundColor3 = Color3.fromRGB(20,20,20)
+frame.BorderSizePixel = 0
+frame.Visible = true
+
+local label = Instance.new("TextLabel", frame)
+label.Size = UDim2.new(1, -10, 0, 28)
+label.Position = UDim2.new(0,5,0,5)
+label.BackgroundTransparency = 1
+label.Text = "No Fruit"
+label.TextScaled = true
+label.TextColor3 = Color3.fromRGB(255,255,255)
+
+local useBtn = Instance.new("TextButton", frame)
+useBtn.Size = UDim2.new(1, -10, 0, 36)
+useBtn.Position = UDim2.new(0,5,0,40)
+useBtn.Text = "Use"
+useBtn.TextScaled = true
+useBtn.AutoButtonColor = true
+
+local currentFruit = nil
+local onCooldown = false
+
+-- Receive pickup from server
+FruitRemote.OnClientEvent:Connect(function(action, data)
+    if action == "Picked" then
+        currentFruit = data
+        label.Text = ("Fruit: %s\nCD: %ds"):format(data.FruitType, data.Cooldown)
+        useBtn.Text = "Use"
+    end
+end)
+
+-- Use button
+useBtn.MouseButton1Click:Connect(function()
+    if not currentFruit then return end
+    if onCooldown then return end
+
+    -- visual local effects (client-side)
+    -- e.g., play animation or particle (omitted for brevity)
+
+    -- inform server to apply ability (server must validate)
+    FruitRemote:FireServer("UseAbility", {FruitType = currentFruit.FruitType})
+
+    -- start cooldown locally
+    onCooldown = true
+    local cd = currentFruit.Cooldown or 5
+    useBtn.Text = ("Cooldown: %d"):format(cd)
+    spawn(function()
+        while cd > 0 do
+            wait(1)
+            cd = cd - 1
+            useBtn.Text = ("Cooldown: %d"):format(cd)
+        end
+        onCooldown = false
+        useBtn.Text = "Use"
+    end)
+end)
+
+-- Optional: clear fruit on death
+Player.CharacterAdded:Connect(function()
+    currentFruit = nil
+    label.Text = "No Fruit"
+    useBtn.Text = "Use"
+    onCooldown = false
+end)
