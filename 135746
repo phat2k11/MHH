@@ -1,0 +1,401 @@
+-- GraiHub_all_features.lua
+-- Tích hợp: config table cho các hub, confirmation trước khi load remote code,
+-- và các cải tiến an toàn + UI rõ ràng.
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local player = Players.LocalPlayer
+
+-- ====================
+-- Config: chỉnh ở đây
+-- ====================
+-- Cấu trúc: { tab = "Tên Tab", entries = { {title, url, enabled, desc}, ... } }
+-- Để "xóa" 1 loader không muốn, set enabled = false hoặc xóa entry khỏi bảng.
+local HUB_CONFIG = {
+    {
+        tab = "Thông Tin",
+        entries = {
+            { title = "YouTuber", url = "", enabled = true, desc = "Grai2 (sao chép link)", action = function()
+                pcall(function() setclipboard("https://youtube.com/@grai2") end)
+            end }
+        }
+    },
+    {
+        tab = "Blox Fruits",
+        entries = {
+            { title = "Redz Hub", url = "https://raw.githubusercontent.com/newredz/BloxFruits/refs/heads/main/Source.luau", enabled = true },
+            { title = "w-azure Hub", url = "https://api.luarmor.net/files/v3/loaders/85e904ae1ff30824c1aa007fc7324f8f.lua", enabled = true },
+            { title = "Fix Lag", url = "https://raw.githubusercontent.com/TurboLite/Script/main/FixLag.lua", enabled = true },
+            { title = "Min Hub", url = "https://raw.githubusercontent.com/LuaCrack/Min/refs/heads/main/MinXt2Eng", enabled = true },
+            { title = "Speed Hub X", url = "https://raw.githubusercontent.com/AhmadV99/Speed-Hub-X/main/Speed%20Hub%20X.lua", enabled = true },
+            { title = "Than Hub", url = "https://raw.githubusercontent.com/thantzy/thanhub/refs/heads/main/thanv1", enabled = true },
+            { title = "BlueX Hub", url = "https://raw.githubusercontent.com/Dev-BlueX/BlueX-Hub/refs/heads/main/Main.lua", enabled = true },
+            { title = "Tsoul Hub", url = "https://raw.githubusercontent.com/Tsuo7/TsuoHub/main/Tsuoscripts", enabled = true },
+            { title = "Volcano Hub V3", url = "https://raw.githubusercontent.com/indexeduu/BF-NewVer/refs/heads/main/V3New.lua", enabled = true },
+            { title = "HOHO Hub", url = "https://raw.githubusercontent.com/acsu123/HOHO_H/main/Loading_UI", enabled = true }
+        }
+    },
+    {
+        tab = "Grow A Garden",
+        entries = {
+            { title = "Nat Hub", url = "https://get.nathub.xyz/loader", enabled = true },
+            { title = "Speed Hub X", url = "https://raw.githubusercontent.com/AhmadV99/Speed-Hub-X/main/Speed%20Hub%20X.lua", enabled = true },
+            { title = "No Lag Hub", url = "https://raw.githubusercontent.com/NoLag-id/No-Lag-HUB/refs/heads/main/Loader/Main.lua", enabled = true },
+            { title = "BlueX Hub", url = "https://raw.githubusercontent.com/Dev-BlueX/BlueX-Hub/refs/heads/main/Main.lua", enabled = true }
+        }
+    },
+    {
+        tab = "99 Nights In The Forest",
+        entries = {
+            { title = "Voidware Hub", url = "https://raw.githubusercontent.com/VapeVoidware/VW-Add/main/nightsintheforest.lua", enabled = true },
+            { title = "Speed Hub X", url = "https://raw.githubusercontent.com/AhmadV99/Speed-Hub-X/main/Speed%20Hub%20X.lua", enabled = true },
+            { title = "Pulse Hub", url = "https://raw.githubusercontent.com/Chavels123/Loader/refs/heads/main/loader.lua", enabled = true }
+        }
+    }
+}
+
+-- ====================
+-- Utilities an toàn
+-- ====================
+local function safeHttpGet(url)
+    if not url or url == "" then return nil, "empty url" end
+    local ok, res = pcall(function()
+        return game:HttpGet(url, true)
+    end)
+    if not ok then
+        return nil, res
+    end
+    return res
+end
+
+local function safeLoadStringAndRun(code, src)
+    local fn, err = loadstring(code)
+    if not fn then
+        return false, ("compile error: %s"):format(tostring(err))
+    end
+    local ok, ret = pcall(fn)
+    if not ok then
+        return false, ("runtime error: %s"):format(tostring(ret))
+    end
+    return true
+end
+
+local function safeLoadFromUrl(url)
+    local body, err = safeHttpGet(url)
+    if not body then
+        return false, ("download failed: %s"):format(tostring(err))
+    end
+    return safeLoadStringAndRun(body, url)
+end
+
+-- Notification simple (floating message)
+local function notify(text, duration)
+    duration = duration or 3
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "GraiNotify"
+    gui.ResetOnSpawn = false
+    gui.Parent = player:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
+
+    local frame = Instance.new("Frame", gui)
+    frame.AnchorPoint = Vector2.new(0.5, 0)
+    frame.Position = UDim2.new(0.5, 0, 0.05, 0)
+    frame.Size = UDim2.new(0, 360, 0, 40)
+    frame.BackgroundTransparency = 0.15
+    frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
+    frame.BorderSizePixel = 0
+    frame.ZIndex = 9999
+    frame.ClipsDescendants = true
+    local txt = Instance.new("TextLabel", frame)
+    txt.Size = UDim2.new(1, -10, 1, -6)
+    txt.Position = UDim2.new(0, 5, 0, 3)
+    txt.BackgroundTransparency = 1
+    txt.Text = text
+    txt.Font = Enum.Font.Gotham
+    txt.TextSize = 18
+    txt.TextColor3 = Color3.new(1,1,1)
+    txt.TextWrapped = true
+    txt.RichText = true
+
+    task.delay(duration, function()
+        if gui and gui.Parent then
+            gui:Destroy()
+        end
+    end)
+end
+
+-- ====================
+-- Intro GUI (như trước)
+-- ====================
+local function createIntro()
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "GraiIntro"
+    gui.ResetOnSpawn = false
+    gui.Parent = player:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
+
+    local bg = Instance.new("Frame", gui)
+    bg.Size = UDim2.new(1,0,1,0)
+    bg.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    bg.BackgroundTransparency = 0.3
+
+    local logo = Instance.new("ImageLabel", gui)
+    logo.AnchorPoint = Vector2.new(0.5,0.5)
+    logo.Position = UDim2.new(0.5,0,0.45,0)
+    logo.Size = UDim2.new(0,0,0,0)
+    logo.BackgroundTransparency = 1
+    logo.Image = "http://www.roblox.com/asset/?id=77111304194141"
+    logo.ImageTransparency = 1
+
+    TweenService:Create(logo, TweenInfo.new(1.2, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0,200,0,200),
+        ImageTransparency = 0
+    }):Play()
+
+    local rotConn
+    rotConn = RunService.RenderStepped:Connect(function(dt)
+        if not (logo and logo.Parent) then
+            if rotConn then rotConn:Disconnect() end
+            return
+        end
+        logo.Rotation = (logo.Rotation + 40 * dt) % 360
+    end)
+
+    local msg = Instance.new("TextLabel", gui)
+    msg.AnchorPoint = Vector2.new(0.5,0)
+    msg.Position = UDim2.new(0.5,0,0.75,0)
+    msg.Size = UDim2.new(0,600,0,80)
+    msg.BackgroundTransparency = 1
+    msg.Text = "Grai Hub"
+    msg.TextColor3 = Color3.fromRGB(0,255,255)
+    msg.Font = Enum.Font.GothamBlack
+    msg.TextScaled = true
+    msg.TextTransparency = 1
+
+    TweenService:Create(msg, TweenInfo.new(1.0), {TextTransparency = 0}):Play()
+    task.delay(4, function()
+        TweenService:Create(logo, TweenInfo.new(1.0), {ImageTransparency = 1}):Play()
+        TweenService:Create(msg, TweenInfo.new(1.0), {TextTransparency = 1}):Play()
+        TweenService:Create(bg, TweenInfo.new(1.0), {BackgroundTransparency = 1}):Play()
+        task.wait(1.2)
+        if rotConn then rotConn:Disconnect() end
+        if gui and gui.Parent then gui:Destroy() end
+    end)
+end
+
+-- ====================
+-- Main Button (toggle)
+-- ====================
+local MAIN_BTN_NAME = "GraiMainButton"
+local function createMainButton()
+    local screen = Instance.new("ScreenGui")
+    screen.Name = MAIN_BTN_NAME
+    screen.Parent = player:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
+    screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    local btn = Instance.new("ImageButton", screen)
+    btn.Name = "OpenBtn"
+    btn.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    btn.BorderSizePixel = 0
+    btn.Position = UDim2.new(0.1, 0, 0.15, 0)
+    btn.Size = UDim2.fromOffset(40,40)
+    btn.Draggable = true
+    btn.Image = "http://www.roblox.com/asset/?id=77111304194141"
+    local corner = Instance.new("UICorner", btn)
+    corner.CornerRadius = UDim.new(1,10)
+
+    return btn
+end
+
+-- ====================
+-- Confirmation dialog UI
+-- ====================
+-- returns true if user approved, false otherwise. If player has attribute "Grai_AlwaysAllow" true, auto-approve.
+local function confirmRun(title, url, desc)
+    if player:GetAttribute("Grai_AlwaysAllow") then
+        return true
+    end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "GraiConfirm"
+    gui.Parent = player:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
+    gui.ResetOnSpawn = false
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    local frame = Instance.new("Frame", gui)
+    frame.AnchorPoint = Vector2.new(0.5,0.5)
+    frame.Position = UDim2.new(0.5,0,0.5,0)
+    frame.Size = UDim2.fromOffset(420,200)
+    frame.BackgroundColor3 = Color3.fromRGB(20,20,20)
+    frame.BorderSizePixel = 0
+
+    local titleLbl = Instance.new("TextLabel", frame)
+    titleLbl.Size = UDim2.new(1, -20, 0, 36)
+    titleLbl.Position = UDim2.new(0,10,0,10)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Text = "Chạy script: "..tostring(title)
+    titleLbl.Font = Enum.Font.GothamBold
+    titleLbl.TextSize = 18
+    titleLbl.TextColor3 = Color3.new(1,1,1)
+    titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local urlLbl = Instance.new("TextLabel", frame)
+    urlLbl.Size = UDim2.new(1, -20, 0, 24)
+    urlLbl.Position = UDim2.new(0,10,0,50)
+    urlLbl.BackgroundTransparency = 1
+    urlLbl.Text = "URL: "..tostring(url)
+    urlLbl.Font = Enum.Font.Gotham
+    urlLbl.TextSize = 14
+    urlLbl.TextColor3 = Color3.fromRGB(200,200,200)
+    urlLbl.TextXAlignment = Enum.TextXAlignment.Left
+    urlLbl.TextWrapped = true
+
+    local descLbl = Instance.new("TextLabel", frame)
+    descLbl.Size = UDim2.new(1, -20, 0, 60)
+    descLbl.Position = UDim2.new(0,10,0,74)
+    descLbl.BackgroundTransparency = 1
+    descLbl.Text = (desc and tostring(desc) or "")
+    descLbl.Font = Enum.Font.Gotham
+    descLbl.TextSize = 14
+    descLbl.TextColor3 = Color3.fromRGB(180,180,180)
+    descLbl.TextXAlignment = Enum.TextXAlignment.Left
+    descLbl.TextWrapped = true
+
+    local allowToggle = Instance.new("TextButton", frame)
+    allowToggle.Size = UDim2.new(0,180,0,30)
+    allowToggle.Position = UDim2.new(0,10,1,-40)
+    allowToggle.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    allowToggle.Text = "Luôn cho phép lần sau: Không"
+    allowToggle.Font = Enum.Font.Gotham
+    allowToggle.TextSize = 14
+    local always = false
+    allowToggle.MouseButton1Click:Connect(function()
+        always = not always
+        allowToggle.Text = "Luôn cho phép lần sau: "..(always and "Có" or "Không")
+    end)
+
+    local btnAccept = Instance.new("TextButton", frame)
+    btnAccept.Size = UDim2.new(0,100,0,30)
+    btnAccept.Position = UDim2.new(1,-110,1,-40)
+    btnAccept.BackgroundColor3 = Color3.fromRGB(0,150,120)
+    btnAccept.Text = "Chấp nhận"
+    btnAccept.Font = Enum.Font.Gotham
+    btnAccept.TextSize = 14
+
+    local btnCancel = Instance.new("TextButton", frame)
+    btnCancel.Size = UDim2.new(0,100,0,30)
+    btnCancel.Position = UDim2.new(1,-220,1,-40)
+    btnCancel.BackgroundColor3 = Color3.fromRGB(120,30,30)
+    btnCancel.Text = "Hủy"
+    btnCancel.Font = Enum.Font.Gotham
+    btnCancel.TextSize = 14
+
+    local result = nil
+    local con1, con2
+    con1 = btnAccept.MouseButton1Click:Connect(function()
+        result = true
+        if always then player:SetAttribute("Grai_AlwaysAllow", true) end
+        gui:Destroy()
+    end)
+    con2 = btnCancel.MouseButton1Click:Connect(function()
+        result = false
+        gui:Destroy()
+    end)
+
+    -- block until GUI destroyed or result set
+    repeat task.wait() until not gui or result ~= nil
+    return result == true
+end
+
+-- ====================
+-- Fluent loader + Window creation (an toàn)
+-- ====================
+local Fluent = nil
+local Window = nil
+
+local function tryLoadFluent()
+    local candidates = {
+        "https://raw.githubusercontent.com/dawid-scripts/Fluent/main/main.lua",
+        "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"
+    }
+    for _, url in ipairs(candidates) do
+        local body, err = safeHttpGet(url)
+        if body then
+            local fn, lerr = loadstring(body)
+            if fn then
+                local ok, res = pcall(fn)
+                if ok then
+                    -- some loaders return api, some set global
+                    Fluent = res or _G.Fluent or Fluent
+                    if Fluent and type(Fluent.CreateWindow) == "function" then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
+-- ====================
+-- Build UI using Fluent if có
+-- ====================
+local function buildUI()
+    if not Fluent then
+        notify("Fluent loader not available. UI menu sẽ không khởi tạo.", 4)
+        return
+    end
+
+    Window = Fluent:CreateWindow({
+        Title="Grai2",
+        SubTitle="Tổng Hợp Script",
+        TabWidth=157,
+        Size=UDim2.fromOffset(560,360),
+        Acrylic=true,
+        Theme="Dark",
+        MinimizeKey=Enum.KeyCode.End
+    })
+
+    local tabs = {}
+    for _, tabConf in ipairs(HUB_CONFIG) do
+        local t = Window:AddTab({ Title = tabConf.tab })
+        tabs[tabConf.tab] = t
+        for _, entry in ipairs(tabConf.entries) do
+            if entry.enabled ~= false then
+                -- create button
+                t:AddButton({
+                    Title = entry.title,
+                    Description = entry.desc,
+                    Callback = function()
+                        -- if entry provides direct function action, run it (with pcall)
+                        if type(entry.action) == "function" then
+                            local ok, err = pcall(entry.action)
+                            if not ok then
+                                notify("Lỗi khi chạy action: "..tostring(err), 3)
+                            end
+                            return
+                        end
+
+                        -- require confirmation
+                        local approved = confirmRun(entry.title, entry.url, entry.desc)
+                        if not approved then
+                            notify("Đã hủy tải: "..entry.title, 2)
+                            return
+                        end
+
+                        notify("Đang tải: "..entry.title, 2)
+                        local ok, err = safeLoadFromUrl(entry.url)
+                        if ok then
+                            notify("Đã chạy: "..entry.title, 3)
+                        else
+                            notify("Lỗi: "..tostring(err), 4)
+                        end
+                    end
+                })
+            end
+        end
+    end
+
+    -- add a settings toggle inside the first tab for "Luôn cho phép" control
+    local infoTab = Window.Tabs and Window.Tabs[1] or nil
+   
